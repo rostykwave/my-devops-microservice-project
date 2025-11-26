@@ -1,0 +1,25 @@
+server:
+  service:
+    type: LoadBalancer
+    port: 443
+
+applications:
+  - name: django-app
+    namespace: argocd
+    project: default
+    source:
+      repoURL: https://github.com/rostykwave/my-devops-microservice-project.git
+      path: charts/django-app
+      targetRevision: lesson-8-9
+      helm:
+        valueFiles:
+          - values.yaml
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: default
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+
+repositories: []

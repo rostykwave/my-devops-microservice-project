@@ -1,124 +1,77 @@
 # my-devops-microservice-project
 
-# Lesson 7: Kubernetes Cluster with EKS and Helm
+## Lesson 8–9: Terraform + Jenkins + Argo CD CI/CD
 
-This project expands on the previous infrastructure by adding an Amazon EKS cluster and deploying a Django application using Helm. It includes ECR for image storage, EKS for orchestration, and a Helm chart with HPA and ConfigMap.
+This iteration provisions the entire delivery platform (S3/DynamoDB backend, networking, ECR, EKS, Jenkins, Argo CD) with Terraform and wires a Jenkins pipeline that builds a Django image with Kaniko, pushes it to Amazon ECR, updates the Helm chart, and lets Argo CD auto-sync the change into the cluster.
 
-## Project Structure
+### Repository layout
 
 ```
-lesson-7/
-│
-├── main.tf                  # Main Terraform configuration
-├── backend.tf               # Backend configuration (S3 + DynamoDB)
-├── outputs.tf               # Outputs
-│
-├── modules/
-│   ├── s3-backend/          # Terraform State storage
-│   ├── vpc/                 # Network infrastructure
-│   ├── ecr/                 # Elastic Container Registry
-│   └── eks/                 # Elastic Kubernetes Service (Cluster + Node Group)
-│
-└── charts/
-    └── django-app/          # Helm Chart for the application
-        ├── templates/
-        │   ├── deployment.yaml
-        │   ├── service.yaml
-        │   ├── hpa.yaml
-        │   └── configmap.yaml
-        ├── Chart.yaml
-        └── values.yaml
+.
+├── backend.tf            # Remote state (S3 + DynamoDB)
+├── main.tf               # Module wiring
+├── outputs.tf            # Shared outputs
+├── Jenkinsfile           # Declarative pipeline for GitOps flow
+├── django/               # Django sample app + Dockerfile
+├── charts/django-app/    # Helm chart consumed by Argo CD
+└── modules/              # Terraform modules (s3-backend, vpc, ecr, eks, jenkins, argo_cd)
 ```
 
-## Infrastructure Components
+## How to apply Terraform
 
-1.  **VPC**: Networking foundation.
-2.  **ECR**: Stores the Docker image for the Django application.
-3.  **EKS**: Kubernetes cluster with a managed Node Group.
-4.  **Helm Chart**:
-    - **Deployment**: Manages the application pods with resource limits.
-    - **Service**: Exposes the application via a LoadBalancer.
-    - **HPA**: Automatically scales pods (2-6 replicas) based on CPU usage (>70%).
-    - **ConfigMap**: Injects environment variables.
+1. Export AWS credentials that can create the required infrastructure and make sure the AWS CLI default region is `eu-central-1` (or update variables accordingly).
+2. Initialize and review the plan:
+   ```bash
+   terraform init
+   terraform plan
+   ```
+3. Provision everything:
+   ```bash
+   terraform apply
+   ```
+   Confirm with `yes`. The run creates the VPC, ECR, EKS (with OIDC for IRSA), Jenkins (via Helm), and Argo CD (via Helm + custom chart for the Application definition).
+4. Export kubeconfig to talk to the new cluster if you need to inspect resources manually:
+   ```bash
+   aws eks update-kubeconfig --region eu-central-1 --name $(terraform output -raw eks_cluster_name)
+   ```
 
-## Prerequisites
+## Jenkins pipeline (build → ECR → GitOps)
 
-- Terraform
-- AWS CLI configured
-- `kubectl`
-- `helm`
-- Docker
+- The repository contains a ready-to-use `Jenkinsfile`. Create either a multibranch pipeline or a regular pipeline pointing to the GitHub repo/branch `lesson-8-9`.
+- Install Jenkins by running Terraform; the chart already ships with the Kubernetes plugin, required agents, and a dedicated service account annotated for IRSA so that Kaniko can authenticate with ECR without static AWS keys.
+- Create the GitHub PAT credential referenced in the pipeline:
+  - Type: “Username with password”
+  - ID: `github-token`
+  - Username: GitHub login
+  - Password: Personal Access Token with `repo` scope
+- Trigger the pipeline. It performs two stages:
+  1. **Build & Push Docker Image** – executes Kaniko inside the cluster (`django/Dockerfile` + `django/` sources) and pushes `878905833569.dkr.ecr.eu-central-1.amazonaws.com/lesson-5-ecr:v1.0.<BUILD_NUMBER>` to ECR.
+  2. **Update Chart Tag in Git** – clones branch `lesson-8-9`, rewrites `charts/django-app/values.yaml` with the freshly built tag, commits, and pushes back to GitHub.
+- Successful completion implies Argo CD notices the git change and syncs automatically (see next section).
 
-## Deployment Steps
+## Verify Argo CD
 
-### 1. Provision Infrastructure with Terraform
+1. Obtain the Argo CD LoadBalancer endpoint:
+   ```bash
+   kubectl get svc -n argocd argo-cd-argocd-server
+   ```
+2. Fetch the initial admin password (Terraform output also contains the command):
+   ```bash
+   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d && echo
+   ```
+3. Log in to the UI and confirm the `django-app` application is **Synced** and **Healthy**. Each Jenkins pipeline run should create a new Helm release revision automatically once the chart tag changes.
 
-Initialize and apply the Terraform configuration to create the VPC, ECR, and EKS cluster.
+## Monitor Jenkins jobs
+
+1. Retrieve the Jenkins external address from `terraform output jenkins_release` / `kubectl get svc -n jenkins`.
+2. Log in with the credentials configured in `modules/jenkins/values.yaml` (default user/pass: `admin` / `admin123`, change in production).
+3. Open the pipeline job created earlier and inspect the console logs for the Kaniko build, ECR push, and Git commit stages.
+4. Confirm the updated tag appears in `charts/django-app/values.yaml` and that Argo CD synced the new chart revision.
+
+## Clean up
 
 ```bash
-terraform init
-terraform apply
-```
-
-_Type `yes` to confirm._
-
-### 2. Configure kubectl
-
-Update your kubeconfig to interact with the newly created EKS cluster.
-
-```bash
-aws eks update-kubeconfig --region eu-central-1 --name eks-cluster-demo
-```
-
-### 3. Build and Push Docker Image
-
-Authenticate with ECR, build your image, and push it to the repository created by Terraform.
-
-```bash
-# Login to ECR
-aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin <YOUR_ACCOUNT_ID>.dkr.ecr.eu-central-1.amazonaws.com
-
-# Build the image (assuming Dockerfile is in the root or specified path)
-docker build -t lesson-5-ecr .
-
-# Tag the image
-docker tag lesson-5-ecr:latest <YOUR_ECR_REPO_URL>:latest
-
-# Push to ECR
-docker push <YOUR_ECR_REPO_URL>:latest
-```
-
-_Note: Replace `<YOUR_ACCOUNT_ID>` and `<YOUR_ECR_REPO_URL>` with actual values from Terraform outputs._
-
-### 4. Deploy Application with Helm
-
-Update `charts/django-app/values.yaml` with your ECR image repository URL, then install the chart.
-
-```bash
-# Install the chart
-helm install django-app ./charts/django-app
-```
-
-### 5. Verify Deployment
-
-Check the status of your resources.
-
-```bash
-# Check pods
-kubectl get pods
-
-# Check service (get External IP)
-kubectl get svc
-
-# Check HPA
-kubectl get hpa
-```
-
-## Cleanup
-
-To remove all resources:
-
-```bash
-helm uninstall django-app
 terraform destroy
 ```
+
+This command tears down the cluster, Jenkins, Argo CD, and all supporting infrastructure (Helm releases, VPC, ECR, etc.).
