@@ -18,3 +18,13 @@ module "ecr" {
   ecr_name     = "lesson-5-ecr"
   scan_on_push = true
 }
+
+module "eks" {
+  source          = "./modules/eks"          
+  cluster_name    = "eks-cluster-demo"          
+  subnet_ids      = module.vpc.public_subnet_ids  
+  instance_type   = "t3.small"                   
+  desired_size    = 1                            
+  max_size        = 2                             
+  min_size        = 1                            
+}

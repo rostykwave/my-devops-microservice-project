@@ -1,0 +1,32 @@
+image:
+  repository: 878905833569.dkr.ecr.eu-central-1.amazonaws.com/lesson-5-ecr
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer
+  port: 8000
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+config:
+  POSTGRES_PORT: "5432"
+  POSTGRES_HOST: "db"
+  POSTGRES_USER: "django_user"
+  POSTGRES_DB: "django_db"
+  POSTGRES_PASSWORD: "pass9764gd"

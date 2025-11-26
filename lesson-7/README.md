@@ -1,107 +1,122 @@
-# Lesson 5: Terraform Infrastructure on AWS
+# Lesson 7: Kubernetes Cluster with EKS and Helm
 
-This project creates infrastructure on AWS using Terraform. It includes S3 backend setup, network infrastructure (VPC), and ECR repository.
-Built on terraform v1.12.2
+This project expands on the previous infrastructure by adding an Amazon EKS cluster and deploying a Django application using Helm. It includes ECR for image storage, EKS for orchestration, and a Helm chart with HPA and ConfigMap.
 
 ## Project Structure
 
 ```
-lesson-5/
+lesson-7/
 │
-├── main.tf                  # Main file for connecting modules
-├── backend.tf               # Backend configuration for states (S3 + DynamoDB)
-├── outputs.tf               # General resource outputs
+├── main.tf                  # Main Terraform configuration
+├── backend.tf               # Backend configuration (S3 + DynamoDB)
+├── outputs.tf               # Outputs
 │
-├── modules/                 # Directory with all modules
-│   │
-│   ├── s3-backend/          # Module for S3 and DynamoDB
-│   │   ├── s3.tf            # S3 bucket creation
-│   │   ├── dynamodb.tf      # DynamoDB creation
-│   │   ├── variables.tf     # Variables for S3
-│   │   └── outputs.tf       # Output information about S3 and DynamoDB
-│   │
-│   ├── vpc/                 # Module for VPC
-│   │   ├── vpc.tf           # VPC, subnets, Internet Gateway creation
-│   │   ├── routes.tf        # Routing configuration
-│   │   ├── variables.tf     # Variables for VPC
-│   │   └── outputs.tf       # Output information about VPC
-│   │
-│   └── ecr/                 # Module for ECR
-│       ├── ecr.tf           # ECR repository creation
-│       ├── variables.tf     # Variables for ECR
-│       └── outputs.tf       # Repository URL output
+├── modules/
+│   ├── s3-backend/          # Terraform State storage
+│   ├── vpc/                 # Network infrastructure
+│   ├── ecr/                 # Elastic Container Registry
+│   └── eks/                 # Elastic Kubernetes Service (Cluster + Node Group)
 │
-└── README.md                # Project documentation
+└── charts/
+    └── django-app/          # Helm Chart for the application
+        ├── templates/
+        │   ├── deployment.yaml
+        │   ├── service.yaml
+        │   ├── hpa.yaml
+        │   └── configmap.yaml
+        ├── Chart.yaml
+        └── values.yaml
 ```
 
-## Module Descriptions
+## Infrastructure Components
 
-### s3-backend
+1.  **VPC**: Networking foundation.
+2.  **ECR**: Stores the Docker image for the Django application.
+3.  **EKS**: Kubernetes cluster with a managed Node Group.
+4.  **Helm Chart**:
+    - **Deployment**: Manages the application pods with resource limits.
+    - **Service**: Exposes the application via a LoadBalancer.
+    - **HPA**: Automatically scales pods (2-6 replicas) based on CPU usage (>70%).
+    - **ConfigMap**: Injects environment variables.
 
-This module creates an S3 bucket for storing Terraform state files and a DynamoDB table for state locking. This ensures secure collaboration on infrastructure.
+## Prerequisites
 
-### vpc
+- Terraform
+- AWS CLI configured
+- `kubectl`
+- `helm`
+- Docker
 
-This module creates a Virtual Private Cloud (VPC) with:
+## Deployment Steps
 
-- Public and private subnets.
-- Internet Gateway for internet access from public subnets.
-- NAT Gateway for internet access from private subnets.
-- Route tables.
+### 1. Provision Infrastructure with Terraform
 
-### ecr
+Initialize and apply the Terraform configuration to create the VPC, ECR, and EKS cluster.
 
-This module creates an Elastic Container Registry (ECR) repository for storing Docker images. Includes automatic image scanning for vulnerabilities on push.
+```bash
+terraform init
+terraform apply
+```
 
-## Commands for Initialization and Execution
+_Type `yes` to confirm._
 
-### First Run (Bootstrap)
+### 2. Configure kubectl
 
-Since the S3 bucket for state doesn't exist yet, follow these steps:
+Update your kubeconfig to interact with the newly created EKS cluster.
 
-1. **Comment out the `backend "s3"` block** in the `backend.tf` file.
-2. **Initialize Terraform locally**:
-   ```bash
-   terraform init
-   ```
-3. **Create S3 bucket and DynamoDB table**:
-   ```bash
-   terraform apply -target=module.s3_backend
-   ```
-4. **Uncomment the `backend "s3"` block** in the `backend.tf` file.
-5. **Migrate state to S3**:
-   ```bash
-   terraform init
-   ```
-   (Press `yes` when asked about state migration).
+```bash
+aws eks update-kubeconfig --region eu-central-1 --name eks-cluster-demo
+```
 
-### Regular Run
+### 3. Build and Push Docker Image
 
-After the initial setup, use standard commands:
+Authenticate with ECR, build your image, and push it to the repository created by Terraform.
 
-1. **Terraform Initialization**:
-   Downloads required providers and modules, and configures the backend.
+```bash
+# Login to ECR
+aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin <YOUR_ACCOUNT_ID>.dkr.ecr.eu-central-1.amazonaws.com
 
-   ```bash
-   terraform init
-   ```
+# Build the image (assuming Dockerfile is in the root or specified path)
+docker build -t lesson-5-ecr .
 
-2. **Review Change Plan**:
-   Shows which resources will be created, modified, or deleted.
+# Tag the image
+docker tag lesson-5-ecr:latest <YOUR_ECR_REPO_URL>:latest
 
-   ```bash
-   terraform plan
-   ```
+# Push to ECR
+docker push <YOUR_ECR_REPO_URL>:latest
+```
 
-3. **Apply Changes**:
-   Creates infrastructure in AWS.
+_Note: Replace `<YOUR_ACCOUNT_ID>` and `<YOUR_ECR_REPO_URL>` with actual values from Terraform outputs._
 
-   ```bash
-   terraform apply
-   ```
+### 4. Deploy Application with Helm
 
-4. **Destroy Infrastructure**:
-   Removes all created resources.
-   ```bash
-   terraform destroy
-   ```
+Update `charts/django-app/values.yaml` with your ECR image repository URL, then install the chart.
+
+```bash
+# Install the chart
+helm install django-app ./charts/django-app
+```
+
+### 5. Verify Deployment
+
+Check the status of your resources.
+
+```bash
+# Check pods
+kubectl get pods
+
+# Check service (get External IP)
+kubectl get svc
+
+# Check HPA
+kubectl get hpa
+```
+
+## Cleanup
+
+To remove all resources:
+
+```bash
+helm uninstall django-app
+terraform destroy
+```
