@@ -75,3 +75,77 @@ terraform destroy
 ```
 
 This command tears down the cluster, Jenkins, Argo CD, and all supporting infrastructure (Helm releases, VPC, ECR, etc.).
+
+## RDS Module
+
+This module creates either an AWS RDS instance or an Aurora Cluster based on the `use_aurora` variable.
+
+### Usage Example
+
+```hcl
+module "rds" {
+  source = "./modules/rds"
+
+  name                       = "myapp-db"
+  use_aurora                 = false # Set to true for Aurora Cluster
+
+  # Common settings
+  engine                     = "postgres"
+  engine_version             = "14.7"
+  instance_class             = "db.t3.micro"
+  allocated_storage          = 20
+  db_name                    = "myapp"
+  username                   = "postgres"
+  password                   = "securepassword"
+  vpc_id                     = module.vpc.vpc_id
+  subnet_private_ids         = module.vpc.private_subnets
+  subnet_public_ids          = module.vpc.public_subnets
+  publicly_accessible        = true
+
+   # Parameters (override defaults max_connections/log_statement/work_mem)
+  parameters = {
+      max_connections = "300"
+      work_mem        = "8MB"
+  }
+}
+```
+
+### Variables
+
+| Name                            | Description                                                               | Type           | Default               |
+| ------------------------------- | ------------------------------------------------------------------------- | -------------- | --------------------- |
+| `use_aurora`                    | If true, creates Aurora Cluster. If false, creates standard RDS instance. | `bool`         | `false`               |
+| `name`                          | Name identifier for resources.                                            | `string`       | -                     |
+| `engine`                        | Database engine for standard RDS (e.g., `postgres`, `mysql`).             | `string`       | `postgres`            |
+| `engine_cluster`                | Database engine for Aurora (e.g., `aurora-postgresql`).                   | `string`       | `aurora-postgresql`   |
+| `engine_version`                | Engine version for standard RDS.                                          | `string`       | `14.7`                |
+| `engine_version_cluster`        | Engine version for Aurora.                                                | `string`       | `15.3`                |
+| `instance_class`                | Instance class (e.g., `db.t3.micro`).                                     | `string`       | `db.t3.micro`         |
+| `allocated_storage`             | Storage size in GB (standard RDS only).                                   | `number`       | `20`                  |
+| `aurora_instance_count`         | Total Aurora instances (module keeps 1 writer + `count-1` readers).       | `number`       | `2`                   |
+| `db_name`                       | Database name.                                                            | `string`       | -                     |
+| `username`                      | Master username.                                                          | `string`       | -                     |
+| `password`                      | Master password.                                                          | `string`       | -                     |
+| `vpc_id`                        | VPC ID where DB will be deployed.                                         | `string`       | -                     |
+| `subnet_private_ids`            | List of private subnet IDs.                                               | `list(string)` | -                     |
+| `subnet_public_ids`             | List of public subnet IDs (used if publicly_accessible is true).          | `list(string)` | -                     |
+| `publicly_accessible`           | Whether the DB is publicly accessible.                                    | `bool`         | `false`               |
+| `multi_az`                      | Enable Multi-AZ deployment.                                               | `bool`         | `false`               |
+| `backup_retention_period`       | Number of days to keep automated backups.                                 | `number`       | `7`                   |
+| `parameters`                    | Map of parameter overrides/extra values (merged with defaults).           | `map(string)`  | `{}`                  |
+| `tags`                          | Common resource tags.                                                     | `map(string)`  | `{}`                  |
+| `parameter_group_family_rds`    | Parameter group family for standard RDS.                                  | `string`       | `postgres15`          |
+| `parameter_group_family_aurora` | Parameter group family for Aurora.                                        | `string`       | `aurora-postgresql15` |
+
+### Built-in parameter tuning
+
+The module always seeds both RDS and Aurora parameter groups with sane defaults for `max_connections`, `log_statement`, and `work_mem`. Provide the `parameters` map only when you need to override these defaults or add extra parameters—user supplied keys take precedence over the built-in values.
+
+### How to change DB type
+
+To switch between Standard RDS and Aurora Cluster, change the `use_aurora` variable:
+
+- **Standard RDS:** Set `use_aurora = false`. Adjust `engine`, `engine_version`, and `instance_class` as needed.
+- **Aurora Cluster:** Set `use_aurora = true`. Adjust `engine_cluster`, `engine_version_cluster`, and `instance_class` as needed.
+
+To change the engine (e.g., from Postgres to MySQL), update the `engine` (for RDS) or `engine_cluster` (for Aurora) variable and ensure the `parameter_group_family_*` matches the new engine family.
