@@ -10,7 +10,7 @@ applications:
     source:
       repoURL: https://github.com/rostykwave/my-devops-microservice-project.git
       path: charts/django-app
-      targetRevision: lesson-8-9
+      targetRevision: final-project
       helm:
         valueFiles:
           - values.yaml

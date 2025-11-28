@@ -44,8 +44,8 @@ spec:
         container('kaniko') {
           sh '''
             /kaniko/executor \
-              --context `pwd` \
-              --dockerfile `pwd`/Dockerfile \
+              --context $(pwd)/Django \
+              --dockerfile $(pwd)/Django/Dockerfile \
               --destination=$ECR_REGISTRY/$IMAGE_NAME:$IMAGE_TAG
           '''
         }
@@ -58,7 +58,7 @@ spec:
           withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PAT')]) {
             sh '''
               rm -rf helm-repo
-              git clone -b lesson-8-9 https://$GIT_USERNAME:$GIT_PAT@${HELM_REPO_URL#https://} helm-repo
+              git clone -b final-project https://$GIT_USERNAME:$GIT_PAT@${HELM_REPO_URL#https://} helm-repo
               cd helm-repo/charts/django-app
 
               sed -i "s/tag: .*/tag: $IMAGE_TAG/" values.yaml
@@ -68,7 +68,7 @@ spec:
 
               git add values.yaml
               git commit -m "Update image tag to $IMAGE_TAG" || echo "Image tag already up to date"
-              git push https://$GIT_USERNAME:$GIT_PAT@${HELM_REPO_URL#https://} lesson-8-9
+              git push https://$GIT_USERNAME:$GIT_PAT@${HELM_REPO_URL#https://} final-project
             '''
           }
         }

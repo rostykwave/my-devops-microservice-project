@@ -22,29 +22,33 @@ module "ecr" {
 module "eks" {
   source        = "./modules/eks"
   cluster_name  = "eks-cluster-demo"
-  subnet_ids    = module.vpc.public_subnet_ids
+  subnet_ids    = module.vpc.private_subnet_ids
   instance_type = "t3.small"
   desired_size  = 2
   max_size      = 3
   min_size      = 1
 }
 
-data "aws_eks_cluster" "eks" {
-  name       = module.eks.eks_cluster_name
-}
-
-data "aws_eks_cluster_auth" "eks" {
-  name       = module.eks.eks_cluster_name
-}
-
 provider "helm" {
   kubernetes = {
-    config_path = "~/.kube/config"
+    host                   = module.eks.eks_cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.eks_cluster_name]
+      command     = "aws"
+    }
   }
 }
 
 provider "kubernetes" {
-  config_path = "~/.kube/config"
+  host                   = module.eks.eks_cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.eks_cluster_name]
+    command     = "aws"
+  }
 }
 
 module "jenkins" {
@@ -64,6 +68,15 @@ module "argo_cd" {
   source        = "./modules/argo_cd"
   namespace     = "argocd"
   chart_version = "5.46.4"
+
+  providers = {
+    helm = helm
+  }
+  depends_on = [module.eks]
+}
+
+module "monitoring" {
+  source = "./modules/monitoring"
 
   providers = {
     helm = helm
@@ -91,7 +104,7 @@ module "rds" {
   password                   = "admin123AWS23"
   subnet_private_ids         = module.vpc.private_subnet_ids
   subnet_public_ids          = module.vpc.public_subnet_ids
-  publicly_accessible        = true
+  publicly_accessible        = false
   vpc_id                     = module.vpc.vpc_id
   multi_az                   = true
   backup_retention_period    = 7

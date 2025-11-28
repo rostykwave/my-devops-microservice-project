@@ -32,7 +32,7 @@ locals {
   default_parameters = {
     max_connections = "100"
     log_statement   = "none"
-    work_mem        = "4MB"
+    work_mem        = "4096"
   }
   merged_parameters = merge(local.default_parameters, var.parameters)
 }
